@@ -1,26 +1,28 @@
 const admin = require("firebase-admin");
+// Realtime Database එක Vercel එකට හඳුන්වා දීම (මෙන්න මේ පේළිය අනිවාර්යයි)
+require("firebase-admin/database"); 
 const path = require("path");
 
-// 1. Firebase Initialize කිරීම (සරල සහ නිවැරදි ක්‍රමය)
+// 1. Firebase Initialize කිරීම
 try {
     admin.initializeApp({
-        credential: admin.credential.cert(path.join(__dirname, "firebase-key.json")), // ඔයාගේ json ෆයිල් එකේ නම මෙතන තියෙන්නේ
-        databaseURL: "https://aviator-lanka-game-default-rtdb.firebaseio.com" // ඔයාගේ DB URL එක
+        credential: admin.credential.cert(path.join(__dirname, "firebase-key.json")),
+        databaseURL: "https://aviator-lanka-game-default-rtdb.firebaseio.com"
     });
 } catch (e) {
-    // දැනටමත් initialize වෙලා තිබුණොත් error එක ignore කරන්න
+    // Already initialized
 }
 
 const db = admin.database();
 const ref = db.ref("live_flight_sync");
 
-// 2. Vercel එකට ඔඩ් එක එක පාරක් අප්ඩේට් කරන්න දෙන API එක
+// 2. Vercel Endpoint
 module.exports = async (req, res) => {
     try {
-        // ගුවන්ගත වන සීමාව සසම්භාවීව (Random) තීරණය කිරීම
+        // Random crash point එකක් හැදීම
         let crashPoint = (Math.random() * 5 + 1).toFixed(2);
         
-        // ඩේටාබේස් එකට අප්ඩේට් කිරීම
+        // Database එකට ඩේටා යැවීම
         await ref.set({
             status: "FLYING",
             multiplier: parseFloat(crashPoint),
