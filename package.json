@@ -1,9 +1,10 @@
 {
   "name": "aviator-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Aviator Live Game Engine Backend",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -11,6 +12,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "firebase-admin": "^14.0.0"
+    "axios": "^1.7.9",
+    "firebase-admin": "^13.0.0"
   }
 }
