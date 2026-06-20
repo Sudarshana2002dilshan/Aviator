@@ -1,160 +1,65 @@
-// index.js - Frontend Game Client Configuration & Engine
+// server.js - Aviator Live Game Engine Backend
+const axios = require("axios");
 
-// ==========================================
-// 1. FIREBASE CONFIGURATION & INITIALIZATION
-// ==========================================
-// ⚠️ කරුණාකර ඔබගේ සැබෑ Firebase විස්තර මෙතනට ඇතුළත් කරන්න
-const firebaseConfig = {
-            apiKey: "AIzaSyCIKJwwBi4iAYsFmm4WDsJKrQ1xmssQWVg",
-            authDomain: "aviator-lanka-game.firebaseapp.com",
-            databaseURL: "https://aviator-lanka-game-default-rtdb.firebaseio.com",
-            projectId: "aviator-lanka-game",
-            storageBucket: "aviator-lanka-game.firebasestorage.app",
-            messagingSenderId: "670278344623",
-            appId: "1:670278344623:web:f299dc03f11a8e9feb195a"
+// 🔗 ඔබේ index.js එකේ ඇති 'live_game_engine' Node එකටම දත්ත යවන සැබෑ Firebase URL එක
+const firebaseURL = "https://aviator-lanka-game-default-rtdb.firebaseio.com/live_game_engine.json";
+
+async function startNewRound() {
+    try {
+        // 1. මේ රවුන්ඩ් එකේ Crash Point එක සසම්භාවීව (Random) තීරණය කිරීම (1.01x - 15.00x)
+        let crashPoint = parseFloat((1.01 + Math.pow(Math.random(), 3) * 14).toFixed(2));
+
+        // 2. ඔඩ් එක 1.00 ඉඳන් Crash Point එකට යන්න ගතවන කාලය මිලි තත්පර වලින් (Duration)
+        // (index.js එකේ ඇති ෆෝමියුලා එකටම ගැලපෙන ලෙස: පියවරකට 150ms බැගින් 0.02ක වැඩිවීමක්)
+        let totalSteps = (crashPoint - 1.00) / 0.02;
+        let durationMs = Math.max(totalSteps * 150, 500); // අවම කාලය මිලි තත්පර 500ක් ලෙස
+
+        console.log(`✈️ New Flight Started: Will crash at ${crashPoint}x in ${(durationMs / 1000).toFixed(2)}s`);
+
+        // 3. Firebase එකට එකපාරක් විස්තර යැවීම (index.js එක බලාපොරොත්තු වන විචල්‍යයන්)
+        let startTime = Date.now();
+        let data = {
+            status: "FLYING",
+            crash_point: crashPoint,
+            start_time: startTime,
+            duration_ms: durationMs
         };
 
+        await axios.put(firebaseURL, data);
 
-// Firebase ආරම්භ කිරීම
-firebase.initializeApp(firebaseConfig);
-const rtdb = firebase.database();
+        // 4. ෆ්ලයිට් එක ඉවර වෙනකම් (යානය පියාසර කරන කාලය පුරා) සර්වර් එක බලාගෙන ඉන්නවා
+        await new Promise(resolve => setTimeout(resolve, durationMs));
 
-// ==========================================
-// 2. GLOBAL GAME STATES & VARIABLES
-// ==========================================
-let syncStatus = "CRASHED"; // SERVER STATES: "FLYING", "CRASHED"
-let syncMultiplier = 1.00;
-let traceX = 0;
-let traceY = 0;
-let particles = [];
-let localGameInterval = null;
+        // 5. නියමිත වෙලාව ආ පසු Crash වුණා කියලා Firebase එක අප්ඩේට් කිරීම
+        console.log(`💥 Crashed at ${crashPoint}x!`);
+        await axios.put(firebaseURL, {
+            status: "CRASHED",
+            crash_point: crashPoint,
+            start_time: startTime,
+            duration_ms: durationMs
+        });
 
-// DOM Elements
-const canvas = document.getElementById("game-canvas"); // ඔබේ HTML එකේ ඇති Canvas ID එක
-const ctx = canvas ? canvas.getContext("2d") : null;
-const plane = document.getElementById("airplane-sprite"); // ඔබේ HTML එකේ ඇති Plane Image ID එක
-const activeSystemLogs = ["WAITING FOR NEXT ROUND", "PREPARING ENGINE", "CONNECTING TO SERVER"];
+        // මීළඟ රවුන්ඩ් එක ආරම්භ වීමට පෙර තත්පර 5ක විවේක කාලයක් (Countdown එක සඳහා)
+        console.log("⏳ Next round will start in 5 seconds...");
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
-// Canvas ප්‍රමාණය සකස් කිරීම
-if (canvas) {
-    canvas.width = 800;
-    canvas.height = 400;
-}
+        // නැවතත් මුල සිට රවුන්ඩ් එකක් ස්ටාර්ට් කිරීම
+        startNewRound();
 
-// ==========================================
-// 3. CORE LIVE GAME ENGINE (SYNCHRONIZER)
-// ==========================================
-function listenToGlobalGameEngine() {
-    console.log("📡 Connecting to Live Flight Sync Engine...");
-
-    // ඔබ සර්වර් එකෙන් දත්ත යවන්නේ 'live_flight_sync' Node එකටයි
-    rtdb.ref("live_game_engine").on("value", (snapshot) => {
-        const data = snapshot.val();
-        if (!data) return;
-
-        // දැනට දුවන පැරණි Loop එකක් ඇත්නම් එය නවත්වන්න
-        if (localGameInterval) clearInterval(localGameInterval);
-
-        syncStatus = data.status; 
-        const serverStartTime = data.start_time;
-        const totalDuration = data.duration_ms;
-        const targetCrashPoint = data.crash_point;
-
-        if (syncStatus === "FLYING") {
-            handleRoundTransitionReset();
-            if (typeof playOscillatorSoundSystem === "function") {
-                playOscillatorSoundSystem(550, "triangle", 0.15);
-            }
-
-            // සර්වර් එකේ කාලය සමඟ මිලි තත්පර 30කට වරක් (High FPS) ක්‍රීඩාව Update කරන ලූප් එක
-            localGameInterval = setInterval(() => {
-                let now = Date.now();
-                let elapsedTime = now - serverStartTime; // යානය පියාසර කර ඇති මුළු කාලය (ms)
-
-                // සර්වර් එකේ දී ඇති කාලය අවසන් නම් වෙබ් අඩවියෙන්ද Crash කරන්න
-                if (elapsedTime >= totalDuration) {
-                    syncStatus = "CRASHED";
-                    clearInterval(localGameInterval);
-                    return;
-                }
-
-                // 🧮 සර්වර් එකේ ගණිතමය ක්‍රමයටම බ්‍රවුසර් එක තුළ Odds සෙවීම:
-                // steps = (elapsedTime / 150), Odds = 1.00 + steps * 0.02
-                let currentSteps = elapsedTime / 150;
-                syncMultiplier = 1.00 + (currentSteps * 0.02);
-
-                // අගය සර්වර් එකේ උපරිම Crash Point එක ඉක්මවා යාම වැළැක්වීම
-                if (syncMultiplier >= targetCrashPoint) {
-                    syncMultiplier = targetCrashPoint;
-                }
-
-                // UI එකට ලයිව් Odds ප්‍රමාණය යාවත්කාලීන කිරීම
-                const multTextEl = document.getElementById("multiplier-text");
-                if (multTextEl) {
-                    multTextEl.innerHTML = `<span style="color:white; font-weight:900; font-size:48px;">${syncMultiplier.toFixed(2)}x</span>`;
-                }
-                
-                // ✈️ ගුවන් යානයේ පිහිටීම (X, Y Graph Coordinates) ගණනය කිරීම
-                if (canvas) {
-                    traceX = Math.min((syncMultiplier - 1.0) * 80, canvas.width - 60);
-                    let baseY = canvas.height - 30 - ((syncMultiplier - 1.0) * 32);
-                    traceY = Math.max(baseY, 30);
-                    let finalAngle = -Math.atan2((canvas.height - 30 - traceY), traceX) * 0.15;
-
-                    // ඔබේ මුල් Script එකේ ඇති Animation ශ්‍රිතයන් ක්‍රියාත්මක කිරීම
-                    if (typeof drawFlightTrajectoryPath === "function") drawFlightTrajectoryPath();
-                    if (typeof processAutoCashoutAutomationTracking === "function") processAutoCashoutAutomationTracking();
-                    if (typeof renderScoreboardInterface === "function") renderScoreboardInterface();
-                    if (typeof updateLiveUncashedButtons === "function") updateLiveUncashedButtons();
-
-                    if (plane) {
-                        plane.style.transform = `rotate(${finalAngle}rad)`;
-                    }
-                    
-                    // දුම් සහ අංශු (Particles) සෑදීම
-                    if (Math.random() < 0.6) {
-                        particles.push({ x: traceX - 5, y: traceY + 12, size: Math.random() * 3 + 1.5, opacity: 0.7 });
-                    }
-                }
-            }, 30); 
-        } 
-        else if (syncStatus === "CRASHED") {
-            // 💥 යානය Crash වූ පසු පෙන්විය යුතු දේ
-            syncMultiplier = targetCrashPoint;
-            const multTextEl = document.getElementById("multiplier-text");
-            if (multTextEl) {
-                multTextEl.innerHTML = `
-                    <span style="color:var(--primary, #ff3b30); font-weight:900; font-size:20px;">💥 FLEW AWAY</span><br>
-                    <span style="font-size:36px; color:#7c839a; font-weight:900;">${syncMultiplier.toFixed(2)}x</span>
-                `;
-            }
-            
-            if (typeof playOscillatorSoundSystem === "function") playOscillatorSoundSystem(130, "sawtooth", 0.45);
-            if (typeof triggerExplosionSparksSpit === "function") triggerExplosionSparksSpit(traceX, traceY);
-            if (typeof processLossBreakdownEndCycle === "function") processLossBreakdownEndCycle();
-
-            // Crash Animation එක දිගටම පවත්වාගෙන යාම
-            localGameInterval = setInterval(() => {
-                if (typeof animateExplosionDebrisFrame === "function") animateExplosionDebrisFrame();
-            }, 30);
-        }
-    });
-}
-
-// ==========================================
-// 4. AUXILIARY INTERFACE & GAME FUNCTIONS
-// ==========================================
-function handleRoundTransitionReset() {
-    particles = [];
-    traceX = 0;
-    traceY = 0;
-    if (ctx && canvas) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    } catch (error) {
+        console.error("❌ Firebase Sync Error:", error.message);
+        // දෝෂයක් ආවොත් සර්වර් එක නතර නොකර තත්පර 3කින් නැවත උත්සාහ කරයි
+        setTimeout(startNewRound, 3000);
     }
-    console.log("🔄 Round transition reset complete.");
 }
 
-// ගේම් එක වෙබ් පිටුව ලෝඩ් වූ සැනින් ආරම්භ කිරීම
-document.addEventListener("DOMContentLoaded", () => {
-    listenToGlobalGameEngine();
+// Render එකේ Web Service එකක් ලෙස රන් වන විට Port එකක් Listen නොකළහොත් ඇතිවන Error එක වැළැක්වීම
+const express = require("express");
+const app = express();
+const PORT = process.env.PORT || 10000;
+app.get("/", (req, res) => res.send("Aviator Lanka Game Engine is Running Live!"));
+app.listen(PORT, () => {
+    console.log(`💻 Dummy Web Port listening on port ${PORT}`);
+    // සර්වර් එන්ජිම ක්‍රියාත්මක කිරීම
+    startNewRound();
 });
