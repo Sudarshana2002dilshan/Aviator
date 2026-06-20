@@ -4,7 +4,7 @@
   "description": "Aviator Live Game Engine Backend",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node ."
   },
   "dependencies": {
     "axios": "^1.7.9",
